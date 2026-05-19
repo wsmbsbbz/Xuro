@@ -13,11 +13,14 @@ import 'package:just_audio/just_audio.dart';
 import 'package:get_it/get_it.dart';
 import 'package:xuro/core/subtitle/subtitle_import_service.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:xuro/core/narration/realtime_narration_service.dart';
+import 'package:xuro/core/settings/app_settings_service.dart';
 
 class PlayerViewModel extends ChangeNotifier {
   final IAudioPlayerService _audioService;
   final PlaybackEventHub _eventHub;
   final ISubtitleService _subtitleService;
+  final RealtimeNarrationService _narrationService;
   final _subtitleLoader = GetIt.I<SubtitleLoader>();
   final _importService = GetIt.I<SubtitleImportService>();
 
@@ -39,9 +42,11 @@ class PlayerViewModel extends ChangeNotifier {
     required IAudioPlayerService audioService,
     required PlaybackEventHub eventHub,
     required ISubtitleService subtitleService,
-  }) : _audioService = audioService,
-       _eventHub = eventHub,
-       _subtitleService = subtitleService {
+    required RealtimeNarrationService narrationService,
+  })  : _audioService = audioService,
+        _eventHub = eventHub,
+        _narrationService = narrationService,
+        _subtitleService = subtitleService {
     _initStreams();
     _requestInitialState();
   }
@@ -49,117 +54,95 @@ class PlayerViewModel extends ChangeNotifier {
   void _initStreams() {
     // 播放状态事件 - 状态变化时通知（播放/暂停/缓冲等）
     _subscriptions.add(
-      _eventHub.playbackState.listen(
-        (event) {
-          _isPlaying = event.state.playing;
-          _position = event.position;  // fallback position for pause/resume
-          _duration = event.duration;
-          _isBuffering = event.state.processingState == ProcessingState.buffering ||
-                         event.state.processingState == ProcessingState.loading;
-          notifyListeners();
-        },
-        onError: (error) => debugPrint('$_tag - 播放状态流错误: $error'),
-      ),
+      _eventHub.playbackState.listen((event) {
+        _isPlaying = event.state.playing;
+        _position = event.position; // fallback position for pause/resume
+        _duration = event.duration;
+        _isBuffering =
+            event.state.processingState == ProcessingState.buffering ||
+                event.state.processingState == ProcessingState.loading;
+        notifyListeners();
+      }, onError: (error) => debugPrint('$_tag - 播放状态流错误: $error')),
     );
 
     // 音轨变更事件
     _subscriptions.add(
-      _eventHub.trackChange.listen(
-        (event) {
-          notifyListeners();
-        },
-        onError: (error) => debugPrint('$_tag - 音轨变更流错误: $error'),
-      ),
+      _eventHub.trackChange.listen((event) {
+        notifyListeners();
+      }, onError: (error) => debugPrint('$_tag - 音轨变更流错误: $error')),
     );
 
     // 播放进度 - UI更新路径：节流到200ms，减少rebuild频率
     _subscriptions.add(
       _eventHub.playbackProgress
           .throttleTime(const Duration(milliseconds: 200))
-          .listen(
-        (event) {
-          _position = event.position;
-          notifyListeners();
-        },
-        onError: (error) => debugPrint('$_tag - 播放进度流错误: $error'),
-      ),
+          .listen((event) {
+        _position = event.position;
+        notifyListeners();
+      }, onError: (error) => debugPrint('$_tag - 播放进度流错误: $error')),
     );
 
     // 播放进度 - 字幕同步路径：保持全精度，不触发rebuild
     _subscriptions.add(
-      _eventHub.playbackProgress.listen(
-        (event) {
-          _subtitleService.updatePosition(event.position);
-        },
-        onError: (error) => debugPrint('$_tag - 字幕同步流错误: $error'),
-      ),
+      _eventHub.playbackProgress.listen((event) {
+        _subtitleService.updatePosition(event.position);
+      }, onError: (error) => debugPrint('$_tag - 字幕同步流错误: $error')),
     );
 
     // 上下文变更事件
     _subscriptions.add(
-      _eventHub.contextChange.listen(
-        (event) async {
-          await _loadSubtitleIfAvailable(event.context);
-          if (_position != null) {
-            _subtitleService.updatePosition(_position!);
-          }
-        },
-        onError: (error) => debugPrint('$_tag - 上下文流错误: $error'),
-      ),
+      _eventHub.contextChange.listen((event) async {
+        await _loadSubtitleIfAvailable(event.context);
+        if (_position != null) {
+          _subtitleService.updatePosition(_position!);
+        }
+      }, onError: (error) => debugPrint('$_tag - 上下文流错误: $error')),
     );
 
     // 初始状态流
     _subscriptions.add(
-      _eventHub.initialState.listen(
-        (event) {
-          if (event.track != null) {
-            notifyListeners();
-          }
-          if (event.context != null) {
-            _loadSubtitleIfAvailable(event.context!);
-          }
-        },
-        onError: (error) => debugPrint('$_tag - 初始状态流错误: $error'),
-      ),
+      _eventHub.initialState.listen((event) {
+        if (event.track != null) {
+          notifyListeners();
+        }
+        if (event.context != null) {
+          _loadSubtitleIfAvailable(event.context!);
+        }
+      }, onError: (error) => debugPrint('$_tag - 初始状态流错误: $error')),
     );
 
     // 错误事件
     _subscriptions.add(
-      _eventHub.errors.listen(
-        (event) {
-          _errorMessage = '播放错误: ${event.operation}';
-          AppLogger.error('播放错误事件: ${event.operation}', event.error, event.stackTrace);
-          notifyListeners();
-        },
-        onError: (error) => debugPrint('$_tag - 错误事件流错误: $error'),
-      ),
+      _eventHub.errors.listen((event) {
+        _errorMessage = '播放错误: ${event.operation}';
+        AppLogger.error(
+          '播放错误事件: ${event.operation}',
+          event.error,
+          event.stackTrace,
+        );
+        notifyListeners();
+      }, onError: (error) => debugPrint('$_tag - 错误事件流错误: $error')),
     );
 
     // 清空状态事件
     _subscriptions.add(
-      _eventHub.playbackCleared.listen(
-        (_) {
-          _isPlaying = false;
-          _isBuffering = false;
-          _position = null;
-          _duration = null;
-          _isUserImportedSubtitle = false;
-          _subtitleService.clearSubtitle();
-          notifyListeners();
-        },
-        onError: (error) => debugPrint('$_tag - 清空状态流错误: $error'),
-      ),
+      _eventHub.playbackCleared.listen((_) {
+        _isPlaying = false;
+        _isBuffering = false;
+        _position = null;
+        _duration = null;
+        _isUserImportedSubtitle = false;
+        _subtitleService.clearSubtitle();
+        notifyListeners();
+      }, onError: (error) => debugPrint('$_tag - 清空状态流错误: $error')),
     );
 
     // 播放完成事件
     _subscriptions.add(
-      _eventHub.playbackCompleted.listen(
-        (event) {
-          _isPlaying = false;
-          notifyListeners();
-        },
-        onError: (error) => debugPrint('$_tag - 播放完成流错误: $error'),
-      ),
+      _eventHub.playbackCompleted.listen((event) {
+        _isPlaying = false;
+        notifyListeners();
+      }, onError: (error) => debugPrint('$_tag - 播放完成流错误: $error')),
     );
 
     _initSubtitleStreams();
@@ -167,22 +150,16 @@ class PlayerViewModel extends ChangeNotifier {
 
   void _initSubtitleStreams() {
     _subscriptions.add(
-      _subtitleService.subtitleStream.listen(
-        (subtitleList) {
-          debugPrint('$_tag - 字幕列表更新: ${subtitleList != null ? '已加载' : '未加载'}');
-        },
-        onError: (error) => debugPrint('$_tag - 字幕流错误: $error'),
-      ),
+      _subtitleService.subtitleStream.listen((subtitleList) {
+        debugPrint('$_tag - 字幕列表更新: ${subtitleList != null ? '已加载' : '未加载'}');
+      }, onError: (error) => debugPrint('$_tag - 字幕流错误: $error')),
     );
 
     _subscriptions.add(
-      _subtitleService.currentSubtitleStream.listen(
-        (subtitle) {
-          _currentSubtitle = subtitle;
-          notifyListeners();
-        },
-        onError: (error) => debugPrint('$_tag - 当前字幕流错误: $error'),
-      ),
+      _subtitleService.currentSubtitleStream.listen((subtitle) {
+        _currentSubtitle = subtitle;
+        notifyListeners();
+      }, onError: (error) => debugPrint('$_tag - 当前字幕流错误: $error')),
     );
   }
 
@@ -193,6 +170,16 @@ class PlayerViewModel extends ChangeNotifier {
   Duration? get position => _position;
   Duration? get duration => _duration;
   Subtitle? get currentSubtitle => _currentSubtitle;
+  RealtimeNarrationService get narrationService => _narrationService;
+  bool get isNarrationEnabled => GetIt.I<AppSettingsService>().narrationEnabled;
+
+  Future<void> setNarrationEnabled(bool enabled) async {
+    await GetIt.I<AppSettingsService>().setNarrationEnabled(enabled);
+    _narrationService.prepare(
+      enabled ? _subtitleService.subtitleList : null,
+      audioUrl: currentContext?.currentFile.mediaDownloadUrl,
+    );
+  }
 
   void clearError() {
     _errorMessage = null;
@@ -211,9 +198,11 @@ class PlayerViewModel extends ChangeNotifier {
         // make the next pause tap a no-op. Fire it; playbackState events
         // drive the UI. resume()/play() has no internal error wrapper, so
         // route failures to the existing PlaybackErrorEvent path.
-        unawaited(_audioService.resume().catchError((Object e, StackTrace st) {
-          _eventHub.emit(PlaybackErrorEvent('resume', e, st));
-        }));
+        unawaited(
+          _audioService.resume().catchError((Object e, StackTrace st) {
+            _eventHub.emit(PlaybackErrorEvent('resume', e, st));
+          }),
+        );
       }
     } finally {
       _isToggling = false;
@@ -262,10 +251,16 @@ class PlayerViewModel extends ChangeNotifier {
       final entry = await _importService.findImported(workId, fileName);
       if (_loadVersion != version) return;
       if (entry != null) {
-        final subtitleList = await _importService.loadLocalSubtitle(entry.subtitlePath);
+        final subtitleList = await _importService.loadLocalSubtitle(
+          entry.subtitlePath,
+        );
         if (_loadVersion != version) return;
         if (subtitleList != null) {
           await _subtitleService.loadSubtitleFromContent(subtitleList);
+          _narrationService.prepare(
+            subtitleList,
+            audioUrl: context.currentFile.mediaDownloadUrl,
+          );
           if (_loadVersion != version) return;
           _isUserImportedSubtitle = true;
           notifyListeners();
@@ -285,8 +280,13 @@ class PlayerViewModel extends ChangeNotifier {
     );
     if (subtitleFile?.mediaDownloadUrl != null) {
       await _subtitleService.loadSubtitle(subtitleFile!.mediaDownloadUrl!);
+      _narrationService.prepare(
+        _subtitleService.subtitleList,
+        audioUrl: context.currentFile.mediaDownloadUrl,
+      );
     } else {
       _subtitleService.clearSubtitle();
+      _narrationService.prepare(null);
       AppLogger.debug('未找到字幕文件，清除现有字幕');
     }
   }
@@ -301,12 +301,17 @@ class PlayerViewModel extends ChangeNotifier {
     if (workId == null || fileName == null) return ImportResult.cancelled;
 
     final response = await _importService.importSubtitle(workId, fileName);
-    if (response.result == ImportResult.success && response.subtitleList != null) {
+    if (response.result == ImportResult.success &&
+        response.subtitleList != null) {
       // Verify we're still on the same track
       final currentWorkId = currentContext?.work.id?.toString();
       final currentFileName = currentContext?.currentFile.title;
       if (currentWorkId == workId && currentFileName == fileName) {
         await _subtitleService.loadSubtitleFromContent(response.subtitleList!);
+        _narrationService.prepare(
+          response.subtitleList,
+          audioUrl: currentContext?.currentFile.mediaDownloadUrl,
+        );
         _isUserImportedSubtitle = true;
         notifyListeners();
       }
@@ -334,7 +339,7 @@ class PlayerViewModel extends ChangeNotifier {
   Future<void> seekToNextLyric() async {
     final currentSubtitle = _subtitleService.currentSubtitleWithState;
     final subtitleList = _subtitleService.subtitleList;
-    
+
     if (currentSubtitle != null && subtitleList != null) {
       final nextSubtitle = currentSubtitle.subtitle.getNext(subtitleList);
       if (nextSubtitle != null) {
@@ -346,9 +351,11 @@ class PlayerViewModel extends ChangeNotifier {
   Future<void> seekToPreviousLyric() async {
     final currentSubtitle = _subtitleService.currentSubtitleWithState;
     final subtitleList = _subtitleService.subtitleList;
-    
+
     if (currentSubtitle != null && subtitleList != null) {
-      final previousSubtitle = currentSubtitle.subtitle.getPrevious(subtitleList);
+      final previousSubtitle = currentSubtitle.subtitle.getPrevious(
+        subtitleList,
+      );
       if (previousSubtitle != null) {
         await seek(previousSubtitle.start);
       }

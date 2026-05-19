@@ -64,6 +64,7 @@ class Strings {
   static const String network = '网络';
   static const String content = '内容';
   static const String playback = '播放';
+  static const String narration = '实时旁白';
   static const String storage = '存储';
   static const String about = '关于';
 
@@ -76,6 +77,25 @@ class Strings {
   static const String audioFormatPreference = '音频格式偏好';
   static const String screenKeepAwake = '屏幕常亮';
   static const String screenKeepAwakeDesc = '播放时保持屏幕开启';
+  static const String narrationEnabled = '开启实时旁白';
+  static const String narrationEnabledDesc = '播放时按字幕生成并叠加中文 TTS 旁白';
+  static const String narrationVolume = '旁白音量';
+  static const String narrationVoice = '旁白语音';
+  static const String narrationConcurrency = '生成并发';
+  static const String narrationConcurrencyDesc = '较高并发生成更快，但可能增加耗电和发热';
+  static const String narrationBackendUrl = '旁白后端地址';
+  static const String narrationBackendUrlDesc =
+      'tts-ijc 服务的 /api 地址；为空则直接使用 Edge 在线 TTS';
+  static const String narrationBackendToken = '旁白后端 Token';
+  static const String narrationBackendTokenDesc =
+      'tts-ijc 登录 token；为空则尝试复用当前登录态';
+  static const String narrationUnavailable = '当前音频未找到可用于旁白的字幕';
+  static const String narrationStatus = '旁白状态';
+  static const String narrationQueue = '旁白队列';
+  static const String narrationReady = '已就绪';
+  static const String narrationGenerating = '生成中';
+  static const String narrationPending = '等待';
+  static const String narrationFailed = '失败';
   static const String cacheManager = '缓存管理';
   static const String themeAutoDesc = '自动切换深浅色模式';
 
@@ -123,8 +143,7 @@ class Strings {
   static const String passwordTooShort = '密码至少 5 位';
   static const String passwordMismatch = '两次输入的密码不一致';
   static const String registerSuccess = '注册成功，已自动登录';
-  static const String registerOkButLoginFailed =
-      '注册成功，但自动登录失败，请用刚才的账号密码登录';
+  static const String registerOkButLoginFailed = '注册成功，但自动登录失败，请用刚才的账号密码登录';
 
   // Settings — color variant
   static const String colorVariantTitle = '主色调';

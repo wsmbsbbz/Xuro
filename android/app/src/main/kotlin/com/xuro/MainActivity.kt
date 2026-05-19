@@ -5,6 +5,7 @@ import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.xuro.lyric.LyricOverlayPlugin
+import com.xuro.tts.TtsSynthesisPlugin
 
 class MainActivity: AudioServiceActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -14,5 +15,10 @@ class MainActivity: AudioServiceActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             "com.xuro/lyric_overlay"
         ).setMethodCallHandler(LyricOverlayPlugin(applicationContext))
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.xuro/tts"
+        ).setMethodCallHandler(TtsSynthesisPlugin(applicationContext))
     }
 }

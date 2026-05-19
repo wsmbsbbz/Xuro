@@ -31,6 +31,11 @@ import 'package:xuro/core/subtitle/storage/user_subtitle_repository.dart';
 import 'package:xuro/core/subtitle/import/i_file_picker_service.dart';
 import 'package:xuro/core/subtitle/import/file_picker_service.dart';
 import 'package:xuro/core/subtitle/subtitle_import_service.dart';
+import 'package:xuro/core/narration/narration_clip_player.dart';
+import 'package:xuro/core/narration/realtime_narration_service.dart';
+import 'package:xuro/core/narration/tts/edge_online_tts_provider.dart';
+import 'package:xuro/core/narration/tts/tts_provider.dart';
+import 'package:xuro/core/narration/tts_clip_cache.dart';
 
 final getIt = GetIt.instance;
 
@@ -42,6 +47,9 @@ Future<void> setupServiceLocator() async {
 
   // 注册 SharedPreferences 实例
   getIt.registerSingleton<SharedPreferences>(prefs);
+
+  // 注册 AppSettingsService
+  getIt.registerSingleton<AppSettingsService>(AppSettingsService(prefs));
 
   // 数据库服务
   getIt.registerLazySingleton<DatabaseService>(() => DatabaseService());
@@ -69,9 +77,21 @@ Future<void> setupServiceLocator() async {
 
   // 核心服务
   getIt.registerLazySingleton<IAudioPlayerService>(
-    () => AudioPlayerService(
+    () => AudioPlayerService(eventHub: getIt(), stateRepository: getIt()),
+  );
+
+  // 实时旁白服务
+  getIt.registerLazySingleton<TtsProvider>(() => EdgeOnlineTtsProvider());
+  getIt.registerLazySingleton<TtsClipCache>(() => TtsClipCache());
+  getIt.registerLazySingleton<NarrationClipPlayer>(() => NarrationClipPlayer());
+  getIt.registerLazySingleton<RealtimeNarrationService>(
+    () => RealtimeNarrationService(
       eventHub: getIt(),
-      stateRepository: getIt(),
+      settings: getIt<AppSettingsService>(),
+      ttsProvider: getIt<TtsProvider>(),
+      clipCache: getIt<TtsClipCache>(),
+      clipPlayer: getIt<NarrationClipPlayer>(),
+      authRepository: getIt<AuthRepository>(),
     ),
   );
 
@@ -81,12 +101,8 @@ Future<void> setupServiceLocator() async {
       audioService: getIt(),
       eventHub: getIt(),
       subtitleService: getIt(),
+      narrationService: getIt(),
     ),
-  );
-
-  // 注册 AppSettingsService
-  getIt.registerSingleton<AppSettingsService>(
-    AppSettingsService(prefs),
   );
 
   // API 服务
@@ -95,9 +111,7 @@ Future<void> setupServiceLocator() async {
   );
 
   // 检查更新服务（独立 GitHub Dio，与 asmr 节点解耦）
-  getIt.registerLazySingleton<UpdateService>(
-    () => UpdateService(),
-  );
+  getIt.registerLazySingleton<UpdateService>(() => UpdateService());
 
   // 添加 AuthService 注册
   getIt.registerLazySingleton<AuthService>(
@@ -105,9 +119,7 @@ Future<void> setupServiceLocator() async {
   );
 
   // 添加 AuthRepository 注册
-  getIt.registerLazySingleton<AuthRepository>(
-    () => AuthRepository(prefs),
-  );
+  getIt.registerLazySingleton<AuthRepository>(() => AuthRepository(prefs));
 
   // 修改 AuthViewModel 注册
   getIt.registerSingleton<AuthViewModel>(
@@ -121,16 +133,12 @@ Future<void> setupServiceLocator() async {
   await getIt<AuthViewModel>().loadSavedAuth();
 
   // 添加字幕服务注册
-  getIt.registerLazySingleton<ISubtitleService>(
-    () => SubtitleService(),
-  );
+  getIt.registerLazySingleton<ISubtitleService>(() => SubtitleService());
 
   await setupSubtitleServices();
 
   // 注册主题控制器
-  getIt.registerLazySingleton<ThemeController>(
-    () => ThemeController(prefs),
-  );
+  getIt.registerLazySingleton<ThemeController>(() => ThemeController(prefs));
 
   // 注册 WakeLockController
   getIt.registerLazySingleton(() => WakeLockController(prefs));
@@ -144,15 +152,21 @@ Future<void> setupSubtitleServices() async {
     return SubtitleLoader(dio: dio);
   });
   if (Platform.isAndroid) {
-    getIt.registerLazySingleton<ILyricOverlayController>(() => LyricOverlayController());
+    getIt.registerLazySingleton<ILyricOverlayController>(
+      () => LyricOverlayController(),
+    );
   } else {
-    getIt.registerLazySingleton<ILyricOverlayController>(() => DummyLyricOverlayController());
+    getIt.registerLazySingleton<ILyricOverlayController>(
+      () => DummyLyricOverlayController(),
+    );
   }
-  getIt.registerLazySingleton(() => LyricOverlayManager(
-    controller: getIt(),
-    subtitleService: getIt(),
-    settings: getIt<AppSettingsService>(),
-  ));
+  getIt.registerLazySingleton(
+    () => LyricOverlayManager(
+      controller: getIt(),
+      subtitleService: getIt(),
+      settings: getIt<AppSettingsService>(),
+    ),
+  );
 
   // 初始化悬浮窗管理器
   await getIt<LyricOverlayManager>().initialize();

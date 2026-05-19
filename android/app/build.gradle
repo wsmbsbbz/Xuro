@@ -47,7 +47,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            signingConfig keystoreProperties['storeFile'] ? signingConfigs.release : signingConfigs.debug
             // 如果还有问题，可以临时禁用混淆
             minifyEnabled true  // 改为 false 可以禁用混淆
             shrinkResources true  // 改为 false 可以禁用资源压缩

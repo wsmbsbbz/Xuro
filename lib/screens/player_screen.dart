@@ -12,6 +12,7 @@ import 'package:xuro/widgets/player/player_work_info.dart';
 import 'package:xuro/core/platform/wakelock_controller.dart';
 import 'package:xuro/common/constants/strings.dart';
 import 'package:xuro/core/subtitle/subtitle_import_service.dart';
+import 'package:xuro/core/narration/realtime_narration_service.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -50,9 +51,11 @@ class _LyricOverlayActionState extends State<_LyricOverlayAction> {
     if (!mounted) return;
     messenger.showSnackBar(
       SnackBar(
-        content: Text(widget.manager.isEditable
-            ? Strings.lyricOverlayEditEntered
-            : Strings.lyricOverlayEditExited),
+        content: Text(
+          widget.manager.isEditable
+              ? Strings.lyricOverlayEditEntered
+              : Strings.lyricOverlayEditExited,
+        ),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -98,6 +101,54 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _viewModel = GetIt.I<PlayerViewModel>();
   }
 
+  Future<void> _showNarrationStatus() async {
+    final service = _viewModel.narrationService;
+    final statusText = switch (service.status) {
+      NarrationRuntimeStatus.unavailable => '不可用',
+      NarrationRuntimeStatus.idle => '待命',
+      NarrationRuntimeStatus.preparing => '准备中',
+      NarrationRuntimeStatus.ready => '已就绪',
+      NarrationRuntimeStatus.playing => '播放中',
+      NarrationRuntimeStatus.failed => '部分失败',
+    };
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text(Strings.narrationStatus),
+        content: ListenableBuilder(
+          listenable: service,
+          builder: (context, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('状态：$statusText'),
+              const SizedBox(height: 8),
+              Text('${Strings.narrationQueue}：${service.totalCount}'),
+              Text('${Strings.narrationReady}：${service.readyCount}'),
+              Text('${Strings.narrationGenerating}：${service.generatingCount}'),
+              Text('${Strings.narrationPending}：${service.pendingCount}'),
+              Text('${Strings.narrationFailed}：${service.failedCount}'),
+              if (service.message != null) ...[
+                const SizedBox(height: 12),
+                Text(service.message!),
+              ],
+              if (service.lastPlayedText != null) ...[
+                const SizedBox(height: 12),
+                Text('最近播放：${service.lastPlayedText!}'),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(Strings.confirm),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildContent() {
     return AnimatedSwitcher(
       duration: AppAnimations.long,
@@ -105,7 +156,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       switchOutCurve: AppAnimations.exit,
       transitionBuilder: (Widget child, Animation<double> animation) {
         final isLyrics = (child as dynamic).key == const ValueKey('lyrics');
-        
+
         return FadeTransition(
           opacity: animation,
           child: SlideTransition(
@@ -114,10 +165,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               end: Offset.zero,
             ).animate(animation),
             child: ScaleTransition(
-              scale: Tween<double>(
-                begin: 0.95,
-                end: 1.0,
-              ).animate(animation),
+              scale: Tween<double>(begin: 0.95, end: 1.0).animate(animation),
               child: child,
             ),
           ),
@@ -173,9 +221,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               color: Colors.transparent,
                               child: Text(
                                 _viewModel.currentTrackInfo?.title ?? '未在播放',
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w600),
                                 textAlign: TextAlign.center,
                               ),
                             ),
@@ -184,11 +233,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           if (_viewModel.currentTrackInfo?.artist != null)
                             Text(
                               _viewModel.currentTrackInfo!.artist,
-                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurface
-                                        .withOpacity(0.7),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyLarge
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface.withOpacity(0.7),
                                   ),
                               textAlign: TextAlign.center,
                             ),
@@ -225,10 +276,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
               if (currentWork != null) {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (context) => DetailScreen(
-                      work: currentWork,
-                      fromPlayer: true,
-                    ),
+                    builder: (context) =>
+                        DetailScreen(work: currentWork, fromPlayer: true),
                   ),
                 );
               }
@@ -258,9 +307,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ImportResult.ioError => Strings.importIoError,
                     };
                     if (message != null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(message)),
-                      );
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text(message)));
                     }
                   } else if (value == 'remove') {
                     await _viewModel.removeImportedSubtitle();
@@ -286,13 +335,65 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           _LyricOverlayAction(manager: lyricManager),
           ListenableBuilder(
+            listenable: _viewModel.narrationService,
+            builder: (context, _) {
+              final enabled = _viewModel.isNarrationEnabled;
+              final service = _viewModel.narrationService;
+              return PopupMenuButton<String>(
+                icon: Icon(
+                  enabled
+                      ? Icons.record_voice_over
+                      : Icons.record_voice_over_outlined,
+                  color: enabled ? Theme.of(context).colorScheme.primary : null,
+                ),
+                tooltip: Strings.narration,
+                onSelected: (value) async {
+                  if (value == 'toggle') {
+                    await _viewModel.setNarrationEnabled(!enabled);
+                    if (!context.mounted) return;
+                    final nextEnabled = _viewModel.isNarrationEnabled;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          nextEnabled
+                              ? (service.hasSegments
+                                  ? '实时旁白已开启：${service.totalCount} 条字幕进入队列'
+                                  : Strings.narrationUnavailable)
+                              : '实时旁白已关闭',
+                        ),
+                      ),
+                    );
+                  } else if (value == 'status') {
+                    await _showNarrationStatus();
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'toggle',
+                    child: Text(enabled ? '关闭实时旁白' : '开启实时旁白'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'status',
+                    child: Text(Strings.narrationStatus),
+                  ),
+                  PopupMenuItem(
+                    enabled: false,
+                    child: Text(
+                      '队列 ${service.readyCount}/${service.totalCount}，生成中 ${service.generatingCount}，失败 ${service.failedCount}',
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          ListenableBuilder(
             listenable: wakeLockController,
             builder: (context, _) {
               return IconButton(
                 icon: Icon(
-                  wakeLockController.enabled 
-                    ? Icons.lightbulb
-                    : Icons.lightbulb_outline,
+                  wakeLockController.enabled
+                      ? Icons.lightbulb
+                      : Icons.lightbulb_outline,
                 ),
                 tooltip: wakeLockController.enabled ? '关闭屏幕常亮' : '开启屏幕常亮',
                 onPressed: () => wakeLockController.toggle(),
